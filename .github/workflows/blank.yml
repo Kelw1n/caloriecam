@@ -1,36 +1,64 @@
-# This is a basic workflow to help you get started with Actions
+name: Build Butterfly unsigned iOS IPA
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+permissions:
+  contents: read
+
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+  build-ios:
+    runs-on: macos-latest
+    timeout-minutes: 45
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+      - name: Extract Butterfly source
+        run: unzip -q Butterfly-iOS-GitHub-v2.0.1.zip -d source
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: source
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          npm install --no-package-lock
+          npm install --no-save --no-package-lock @capacitor/ios@^8.0.0
+
+      - name: Verify and build web application
+        working-directory: source
+        run: |
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Create and prepare iOS project
+        working-directory: source
+        run: |
+          npx cap add ios --packagemanager SPM
+          npm run ios:prepare
+
+      - name: Verify native plugins
+        working-directory: source
+        run: |
+          grep -R "ButterflyNative" ios/App/App.xcodeproj ios/App/CapApp-SPM 2>/dev/null
+          grep -R "CredentialVault" ios/App 2>/dev/null
+
+      - name: Build unsigned ARM64 IPA
+        working-directory: source
+        run: bash scripts/build-unsigned-ipa.sh
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Butterfly-ios-unsigned-v2.0.1
+          path: |
+            source/Butterfly-unsigned.ipa
+            source/Butterfly-unsigned.sha256
+          if-no-files-found: error
+          retention-days: 30
